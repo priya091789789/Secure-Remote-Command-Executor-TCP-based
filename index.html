@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Remote Terminal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            background: linear-gradient(135deg, #0a0f1c 0%, #1a1f2e 50%, #0f1419 100%);
+            color: #00ff41;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .main-container {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            grid-template-rows: auto 1fr;
+            height: 100vh;
+            gap: 15px;
+            padding: 15px;
+        }
+
+        .header {
+            grid-column: 1 / -1;
+            background: linear-gradient(90deg, rgba(0, 255, 65, 0.15), rgba(0, 255, 65, 0.05));
+            border: 1px solid rgba(0, 255, 65, 0.3);
+            border-radius: 10px;
+            padding: 12px 20px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 15px rgba(0, 255, 65, 0.1);
+        }
+
+        .header h1 {
+            font-size: 1.4rem;
+            margin-bottom: 4px;
+            text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
+        }
+
+        .header p {
+            font-size: 0.85rem;
+            opacity: 0.8;
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .panel {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(0, 255, 65, 0.4);
+            border-radius: 8px;
+            backdrop-filter: blur(5px);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .panel-header {
+            background: rgba(0, 255, 65, 0.1);
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+            border-radius: 8px 8px 0 0;
+            font-size: 0.9rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-content {
+            padding: 12px;
+        }
+
+        .connection-panel {
+            flex: 0;
+        }
+
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 0.8rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff4444;
+            animation: pulse 2s infinite;
+            margin-right: 6px;
+        }
+
+        .status-dot.connected {
+            background: #00ff41;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .input-group {
+            flex: 1;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 0.75rem;
+            margin-bottom: 3px;
+            opacity: 0.9;
+        }
+
+        .input-group input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid rgba(0, 255, 65, 0.3);
+            border-radius: 4px;
+            padding: 6px 8px;
+            color: #00ff41;
+            font-family: inherit;
+            font-size: 0.8rem;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: #00ff41;
+            box-shadow: 0 0 8px rgba(0, 255, 65, 0.3);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        .btn {
+            flex: 1;
+            background: rgba(0, 255, 65, 0.15);
+            border: 1px solid rgba(0, 255, 65, 0.4);
+            border-radius: 4px;
+            padding: 6px 8px;
+            color: #00ff41;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.75rem;
+            transition: all 0.2s ease;
+        }
+
+        .btn:hover:not(:disabled) {
+            background: rgba(0, 255, 65, 0.25);
+            box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .commands-panel {
+            flex: 1;
+        }
+
+        .command-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+
+        .cmd-btn {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(0, 255, 65, 0.3);
+            border-radius: 4px;
+            padding: 6px 8px;
+            color: #00ff41;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.75rem;
+            text-align: center;
+            transition: all 0.2s ease;
+            border-left: 3px solid #00ff41;
+        }
+
+        .cmd-btn:hover {
+            background: rgba(0, 255, 65, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .terminal-container {
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid rgba(0, 255, 65, 0.4);
+            border-radius: 10px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .terminal-header {
+            background: linear-gradient(90deg, rgba(0, 255, 65, 0.15), rgba(0, 255, 65, 0.05));
+            padding: 10px 15px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.3);
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            font-size: 0.9rem;
+        }
+
+        .terminal-title {
+            font-weight: bold;
+            flex: 1;
+        }
+
+        .terminal-controls {
+            display: flex;
+            gap: 6px;
+        }
+
+        .control-btn {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+
+        .control-btn:hover {
+            transform: scale(1.1);
+        }
+
+        .close { background: #ff5f5f; }
+        .minimize { background: #ffff5f; }
+        .maximize { background: #5fff5f; }
+
+        .terminal-output {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            font-size: 0.85rem;
+            line-height: 1.3;
+            scroll-behavior: smooth;
+            min-height: 0;
+        }
+
+        .terminal-output::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .terminal-output::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .terminal-output::-webkit-scrollbar-thumb {
+            background: rgba(0, 255, 65, 0.5);
+            border-radius: 3px;
+        }
+
+        .command-line {
+            margin: 4px 0;
+        }
+
+        .prompt {
+            color: #00ff41;
+            font-weight: bold;
+        }
+
+        .command {
+            color: #ffffff;
+        }
+
+        .output {
+            color: #cccccc;
+            margin-left: 15px;
+            white-space: pre-wrap;
+        }
+
+        .error {
+            color: #ff4444;
+        }
+
+        .success {
+            color: #00ff41;
+        }
+
+        .terminal-input {
+            display: flex;
+            align-items: center;
+            padding: 12px 15px;
+            border-top: 1px solid rgba(0, 255, 65, 0.3);
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .terminal-input .prompt {
+            margin-right: 8px;
+            font-size: 0.85rem;
+        }
+
+        .command-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #ffffff;
+            font-family: inherit;
+            font-size: 0.85rem;
+            outline: none;
+        }
+
+        .welcome-screen {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .welcome-screen h2 {
+            margin-bottom: 15px;
+            color: #00ff41;
+            font-size: 1.2rem;
+        }
+
+        .welcome-screen p {
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        @media (max-width: 1024px) {
+            .main-container {
+                grid-template-columns: 250px 1fr;
+                gap: 10px;
+                padding: 10px;
+            }
+            
+            .command-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .main-container {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto 1fr;
+            }
+            
+            .sidebar {
+                flex-direction: row;
+                gap: 10px;
+            }
+            
+            .connection-panel,
+            .commands-panel {
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="header">
+            <h1>🔐 Secure Remote Terminal</h1>
+            <p>Professional Command Execution Interface</p>
+        </div>
+
+        <div class="sidebar">
+            <div class="panel connection-panel">
+                <div class="panel-header">
+                    <span>🔌</span>
+                    Connection
+                </div>
+                <div class="panel-content">
+                    <div class="status-row">
+                        <div style="display: flex; align-items: center;">
+                            <div class="status-dot" id="statusDot"></div>
+                            <span id="connectionStatus">Disconnected</span>
+                        </div>
+                        <span id="encryptionInfo" style="font-size: 0.7rem; opacity: 0.7;">No encryption</span>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="input-group">
+                            <label for="hostname">Host</label>
+                            <input type="text" id="hostname" value="localhost">
+                        </div>
+                        <div class="input-group" style="flex: 0.6;">
+                            <label for="port">Port</label>
+                            <input type="number" id="port" value="8443">
+                        </div>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" placeholder="Enter password">
+                    </div>
+                    
+                    <div class="btn-group">
+                        <button class="btn" id="connectBtn" onclick="connect()">Connect</button>
+                        <button class="btn" id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel commands-panel">
+                <div class="panel-header">
+                    <span>⚡</span>
+                    Quick Commands
+                </div>
+                <div class="panel-content">
+                    <div class="command-grid">
+                        <div class="cmd-btn" onclick="executeCommand('ls -la')">ls -la</div>
+                        <div class="cmd-btn" onclick="executeCommand('pwd')">pwd</div>
+                        <div class="cmd-btn" onclick="executeCommand('whoami')">whoami</div>
+                        <div class="cmd-btn" onclick="executeCommand('date')">date</div>
+                        <div class="cmd-btn" onclick="executeCommand('uptime')">uptime</div>
+                        <div class="cmd-btn" onclick="executeCommand('df -h')">df -h</div>
+                        <div class="cmd-btn" onclick="executeCommand('ps aux')">ps aux</div>
+                        <div class="cmd-btn" onclick="executeCommand('uname -a')">uname -a</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="terminal-container">
+            <div class="terminal-header">
+                <div class="terminal-title">Remote Terminal</div>
+                <div class="terminal-controls">
+                    <button class="control-btn close" onclick="clearTerminal()"></button>
+                    <button class="control-btn minimize"></button>
+                    <button class="control-btn maximize" onclick="toggleFullscreen()"></button>
+                </div>
+            </div>
+            
+            <div class="terminal-output" id="terminalOutput">
+                <div class="welcome-screen">
+                    <h2>Welcome to Secure Remote Terminal</h2>
+                    <p>Connect to a server to start executing commands</p>
+                    <p>Secure client-server communication with SSL/TLS encryption</p>
+                </div>
+            </div>
+            
+            <div class="terminal-input">
+                <span class="prompt">user@remote:~$</span>
+                <input type="text" class="command-input" id="commandInput" placeholder="Enter command..." disabled onkeypress="handleKeyPress(event)">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let isConnected = false;
+        let commandHistory = [];
+        let historyIndex = -1;
+
+        // Safe commands whitelist
+        const SAFE_COMMANDS = [
+            'ls', 'pwd', 'whoami', 'date', 'uptime', 'df', 'ps', 'uname',
+            'echo', 'cat', 'head', 'tail', 'wc', 'grep', 'find', 'which'
+        ];
+
+        function connect() {
+            const hostname = document.getElementById('hostname').value;
+            const port = document.getElementById('port').value;
+            const password = document.getElementById('password').value;
+
+            if (!hostname || !port || !password) {
+                addToTerminal('Error: Please fill in all connection fields', 'error');
+                return;
+            }
+
+            // Simulate connection process
+            addToTerminal(`Connecting to ${hostname}:${port}...`, 'output');
+            addToTerminal('Initializing SSL/TLS connection...', 'output');
+            
+            setTimeout(() => {
+                addToTerminal('✓ TLS handshake completed', 'success');
+                addToTerminal('✓ Certificate verification successful', 'success');
+                addToTerminal('Authenticating...', 'output');
+                
+                setTimeout(() => {
+                    if (password === 'secret') {
+                        addToTerminal('✓ Authentication successful', 'success');
+                        addToTerminal(`✓ Connected using TLS v1.3 encryption`, 'success');
+                        setConnectionStatus(true);
+                        document.getElementById('commandInput').disabled = false;
+                        document.getElementById('commandInput').focus();
+                    } else {
+                        addToTerminal('✗ Authentication failed: Invalid password', 'error');
+                        addToTerminal('✗ Connection terminated', 'error');
+                    }
+                }, 800);
+            }, 1000);
+        }
+
+        function disconnect() {
+            addToTerminal('Closing connection...', 'output');
+            setTimeout(() => {
+                addToTerminal('✓ Connection closed', 'output');
+                setConnectionStatus(false);
+                document.getElementById('commandInput').disabled = true;
+            }, 500);
+        }
+
+        function setConnectionStatus(connected) {
+            isConnected = connected;
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('connectionStatus');
+            const encryptionInfo = document.getElementById('encryptionInfo');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+
+            if (connected) {
+                statusDot.classList.add('connected');
+                statusText.textContent = 'Connected';
+                encryptionInfo.textContent = 'TLS v1.3';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+            } else {
+                statusDot.classList.remove('connected');
+                statusText.textContent = 'Disconnected';
+                encryptionInfo.textContent = 'No encryption';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        function executeCommand(command) {
+            if (!isConnected) {
+                addToTerminal('Error: Not connected to server', 'error');
+                return;
+            }
+
+            if (!command.trim()) return;
+
+            // Add command to history
+            commandHistory.unshift(command);
+            historyIndex = -1;
+
+            // Display command
+            addToTerminal(`user@remote:~$ ${command}`, 'command', true);
+
+            // Check if command is safe
+            const baseCommand = command.split(' ')[0];
+            if (!SAFE_COMMANDS.includes(baseCommand) && baseCommand !== 'exit') {
+                addToTerminal(`Command '${baseCommand}' not allowed`, 'error');
+                return;
+            }
+
+            // Simulate command execution
+            setTimeout(() => {
+                simulateCommandOutput(command);
+            }, Math.random() * 800 + 300);
+        }
+
+        function simulateCommandOutput(command) {
+            const cmd = command.trim().toLowerCase();
+            let output = '';
+
+            switch (cmd.split(' ')[0]) {
+                case 'ls':
+                    output = 'drwxr-xr-x  3 user user  4096 Jan 15 10:30 Desktop\n' +
+                            'drwxr-xr-x  2 user user  4096 Jan 14 15:20 Documents\n' +
+                            'drwxr-xr-x  2 user user  4096 Jan 13 09:45 Downloads\n' +
+                            '-rw-r--r--  1 user user   256 Jan 15 11:00 example.txt';
+                    break;
+                case 'pwd':
+                    output = '/home/user';
+                    break;
+                case 'whoami':
+                    output = 'user';
+                    break;
+                case 'date':
+                    output = new Date().toString();
+                    break;
+                case 'uptime':
+                    output = 'up 5 days, 12:34, 1 user, load average: 0.15, 0.12, 0.08';
+                    break;
+                case 'df':
+                    output = 'Filesystem     1K-blocks    Used Available Use% Mounted on\n' +
+                            '/dev/sda1       20480000 8192000  12288000  40% /\n' +
+                            'tmpfs            2097152       0   2097152   0% /tmp';
+                    break;
+                case 'ps':
+                    output = 'PID TTY          TIME CMD\n' +
+                            '1234 pts/0    00:00:01 bash\n' +
+                            '5678 pts/0    00:00:00 server\n' +
+                            '9012 pts/0    00:00:00 ps';
+                    break;
+                case 'uname':
+                    output = 'Linux demo-server 5.15.0 #1 SMP x86_64 GNU/Linux';
+                    break;
+                case 'exit':
+                    addToTerminal('Server connection closed by client', 'output');
+                    disconnect();
+                    return;
+                default:
+                    if (cmd.startsWith('echo')) {
+                        output = cmd.substring(5);
+                    } else {
+                        output = `Command executed: ${command}`;
+                    }
+            }
+
+            addToTerminal(output, 'output');
+        }
+
+        function addToTerminal(text, type = 'output', isCommand = false) {
+            const terminal = document.getElementById('terminalOutput');
+            const line = document.createElement('div');
+            line.className = `command-line ${type}`;
+            
+            if (isCommand) {
+                line.innerHTML = `<span class="prompt">></span> <span class="command">${text}</span>`;
+            } else {
+                line.innerHTML = `<span class="${type}">${text}</span>`;
+            }
+            
+            terminal.appendChild(line);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function clearTerminal() {
+            document.getElementById('terminalOutput').innerHTML = '';
+        }
+
+        function handleKeyPress(event) {
+            const input = document.getElementById('commandInput');
+            
+            if (event.key === 'Enter') {
+                const command = input.value.trim();
+                if (command) {
+                    executeCommand(command);
+                    input.value = '';
+                }
+            } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                if (historyIndex < commandHistory.length - 1) {
+                    historyIndex++;
+                    input.value = commandHistory[historyIndex];
+                }
+            } else if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    input.value = commandHistory[historyIndex];
+                } else if (historyIndex === 0) {
+                    historyIndex = -1;
+                    input.value = '';
+                }
+            }
+        }
+
+        function toggleFullscreen() {
+            const container = document.querySelector('.terminal-container');
+            if (container.style.position === 'fixed') {
+                container.style.position = '';
+                container.style.top = '';
+                container.style.left = '';
+                container.style.width = '';
+                container.style.height = '';
+                container.style.zIndex = '';
+            } else {
+                container.style.position = 'fixed';
+                container.style.top = '0';
+                container.style.left = '0';
+                container.style.width = '100vw';
+                container.style.height = '100vh';
+                container.style.zIndex = '1000';
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('hostname').focus();
+            
+            setTimeout(() => {
+                addToTerminal('✓ System initialized', 'success');
+                addToTerminal('Ready for secure connections', 'output');
+            }, 500);
+        });
+    </script>
+</body>
+</html>
