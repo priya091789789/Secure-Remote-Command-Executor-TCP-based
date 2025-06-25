@@ -20,3 +20,20 @@ A client-server application demonstrating secure remote command execution with S
 
 ## Security Note
 This is an educational demonstration. In production, implement proper security measures.
+
+
+# Compile server
+gcc -o server server.c -lssl -lcrypto
+
+# Compile client  
+gcc -o client client.c -lssl -lcrypto
+
+
+your-project/
+├── server.c
+├── client.c  
+├── index.html (the web interface)
+├── cert.pem
+├── key.pem
+├── README.md
+└── setup.sh
