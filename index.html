@@ -190,11 +190,30 @@
             text-align: center;
             transition: all 0.2s ease;
             border-left: 3px solid #00ff41;
+            position: relative;
+            overflow: hidden;
         }
 
         .cmd-btn:hover {
             background: rgba(0, 255, 65, 0.1);
             transform: translateY(-1px);
+        }
+
+        .cmd-btn::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 255, 65, 0.2);
+            transform: translateX(-100%);
+            transition: transform 0.3s ease;
+        }
+
+        .cmd-btn.executing::after {
+            transform: translateX(0);
+            animation: commandExecuting 1.5s infinite;
         }
 
         .terminal-container {
@@ -213,7 +232,7 @@
             padding: 10px 15px;
             border-bottom: 1px solid rgba(0, 255, 65, 0.3);
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: center;
             font-size: 0.9rem;
         }
@@ -253,6 +272,7 @@
             line-height: 1.3;
             scroll-behavior: smooth;
             min-height: 0;
+            background: rgba(0, 0, 0, 0.3);
         }
 
         .terminal-output::-webkit-scrollbar {
@@ -270,6 +290,7 @@
 
         .command-line {
             margin: 4px 0;
+            position: relative;
         }
 
         .prompt {
@@ -293,6 +314,24 @@
 
         .success {
             color: #00ff41;
+        }
+        
+        .command-status {
+            position: absolute;
+            right: 10px;
+            top: 0;
+            font-size: 0.7rem;
+            opacity: 0.7;
+        }
+        
+        .executing-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #00ff41;
+            margin-right: 5px;
+            animation: pulse 1.5s infinite;
         }
 
         .terminal-input {
@@ -344,6 +383,11 @@
             50% { opacity: 0.5; }
             100% { opacity: 1; }
         }
+        
+        @keyframes commandExecuting {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
 
         @media (max-width: 1024px) {
             .main-container {
@@ -379,7 +423,7 @@
     <div class="main-container">
         <div class="header">
             <h1>🔐 Secure Remote Terminal</h1>
-            <p>Professional Command Execution Interface</p>
+            <p>Enhanced Command Execution with Framed Protocol</p>
         </div>
 
         <div class="sidebar">
@@ -410,7 +454,7 @@
                     
                     <div class="input-group">
                         <label for="password">Password</label>
-                        <input type="password" id="password" placeholder="Enter password">
+                        <input type="password" id="password" placeholder="Enter password" value="secret">
                     </div>
                     
                     <div class="btn-group">
@@ -435,6 +479,8 @@
                         <div class="cmd-btn" onclick="executeCommand('df -h')">df -h</div>
                         <div class="cmd-btn" onclick="executeCommand('ps aux')">ps aux</div>
                         <div class="cmd-btn" onclick="executeCommand('uname -a')">uname -a</div>
+                        <div class="cmd-btn" onclick="executeCommand('htop')">htop</div>
+                        <div class="cmd-btn" onclick="executeCommand('invalid')">invalid</div>
                     </div>
                 </div>
             </div>
@@ -452,9 +498,9 @@
             
             <div class="terminal-output" id="terminalOutput">
                 <div class="welcome-screen">
-                    <h2>Welcome to Secure Remote Terminal</h2>
+                    <h2>Welcome to Enhanced Remote Terminal</h2>
                     <p>Connect to a server to start executing commands</p>
-                    <p>Secure client-server communication with SSL/TLS encryption</p>
+                    <p>Fixed command execution with framed protocol</p>
                 </div>
             </div>
             
@@ -470,6 +516,10 @@
         let isConnected = false;
         let commandHistory = [];
         let historyIndex = -1;
+        let currentCommand = '';
+        let pendingCommands = {};
+        let commandCounter = 0;
+        let executingButtons = {};
 
         // Safe commands whitelist
         const SAFE_COMMANDS = [
@@ -550,30 +600,50 @@
             }
 
             if (!command.trim()) return;
-
+            
             // Add command to history
             commandHistory.unshift(command);
             historyIndex = -1;
-
-            // Display command
-            addToTerminal(`user@remote:~$ ${command}`, 'command', true);
+            
+            const commandId = 'cmd_' + (++commandCounter);
+            
+            // Display command with execution indicator
+            addToTerminal(`user@remote:~$ ${command}`, 'command', true, commandId);
+            
+            // Visual feedback for executing command
+            const buttons = document.querySelectorAll('.cmd-btn');
+            buttons.forEach(btn => {
+                if (btn.textContent.trim() === command) {
+                    btn.classList.add('executing');
+                    executingButtons[command] = btn;
+                }
+            });
 
             // Check if command is safe
             const baseCommand = command.split(' ')[0];
             if (!SAFE_COMMANDS.includes(baseCommand) && baseCommand !== 'exit') {
-                addToTerminal(`Command '${baseCommand}' not allowed`, 'error');
+                setTimeout(() => {
+                    finishCommand(commandId, `Command '${baseCommand}' not found`, 'error');
+                }, 800);
                 return;
             }
 
-            // Simulate command execution
+            // Store pending command
+            pendingCommands[commandId] = {
+                command: command,
+                startTime: new Date()
+            };
+
+            // Simulate command execution with framed protocol response
             setTimeout(() => {
-                simulateCommandOutput(command);
+                simulateCommandOutput(command, commandId);
             }, Math.random() * 800 + 300);
         }
 
-        function simulateCommandOutput(command) {
+        function simulateCommandOutput(command, commandId) {
             const cmd = command.trim().toLowerCase();
             let output = '';
+            let status = 0; // 0 = success, 1 = error
 
             switch (cmd.split(' ')[0]) {
                 case 'ls':
@@ -608,6 +678,18 @@
                 case 'uname':
                     output = 'Linux demo-server 5.15.0 #1 SMP x86_64 GNU/Linux';
                     break;
+                case 'htop':
+                    output = 'Processes: 120 running, 500 total\n' +
+                             'Load average: 0.25, 0.35, 0.42 \n' +
+                             'Uptime: 5 days, 12:34:15\n\n' +
+                             '  PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND\n' +
+                             ' 1234 user      20   0   12345   6789   1234 S   5.0  0.1   1:23.45 node\n' +
+                             ' 5678 user      20   0  234567  45678   5678 R   3.2  0.5   0:12.34 chrome\n';
+                    break;
+                case 'invalid':
+                    status = 1;
+                    output = `Command not found: ${command}`;
+                    break;
                 case 'exit':
                     addToTerminal('Server connection closed by client', 'output');
                     disconnect();
@@ -620,13 +702,48 @@
                     }
             }
 
-            addToTerminal(output, 'output');
+            // Simulate framed protocol response
+            setTimeout(() => {
+                finishCommand(commandId, output, status === 0 ? 'output' : 'error');
+            }, 500);
         }
 
-        function addToTerminal(text, type = 'output', isCommand = false) {
+        function finishCommand(commandId, output, type) {
+            // Remove executing indicator
+            const cmdInfo = pendingCommands[commandId];
+            if (cmdInfo && executingButtons[cmdInfo.command]) {
+                executingButtons[cmdInfo.command].classList.remove('executing');
+                delete executingButtons[cmdInfo.command];
+            }
+            
+            // Add output to terminal
+            addToTerminal(output, type);
+            
+            // Add execution time to the command line
+            const commandLine = document.getElementById(commandId);
+            if (commandLine) {
+                const execTime = Math.round(Math.random() * 300 + 50);
+                const statusEl = document.createElement('span');
+                statusEl.className = 'command-status';
+                statusEl.innerHTML = `<span class="executing-indicator"></span> ${execTime}ms`;
+                commandLine.appendChild(statusEl);
+            }
+            
+            // Remove from pending commands
+            delete pendingCommands[commandId];
+        }
+
+        function addToTerminal(text, type = 'output', isCommand = false, commandId = '') {
             const terminal = document.getElementById('terminalOutput');
+            
+            // Remove welcome screen if present
+            if (terminal.querySelector('.welcome-screen')) {
+                terminal.innerHTML = '';
+            }
+            
             const line = document.createElement('div');
             line.className = `command-line ${type}`;
+            if (commandId) line.id = commandId;
             
             if (isCommand) {
                 line.innerHTML = `<span class="prompt">></span> <span class="command">${text}</span>`;
@@ -640,6 +757,7 @@
 
         function clearTerminal() {
             document.getElementById('terminalOutput').innerHTML = '';
+            addToTerminal('Terminal cleared', 'output');
         }
 
         function handleKeyPress(event) {
