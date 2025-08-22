@@ -1,151 +1,208 @@
-// server.c: Secure command-exec server
+// client.c: Secure Remote Command Executor Client
+#define _POSIX_C_SOURCE 200112L
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
+#include <netdb.h>
 #include <unistd.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
-#define PASS "secret"  // Hard-coded password (insecure in production)
+#define PASS "secret"  
 
-// Helper to print errors and exit
-void berr_exit(const char *msg) {
-    perror(msg);
-    exit(1);
-}
-
-// Initialize SSL context for server (TLS)
-SSL_CTX *InitServerCTX(void) {
-    const SSL_METHOD *method = TLS_server_method();  // negotiate highest TLS version
+// Initialize SSL context
+SSL_CTX* InitSSLContext() {
+    const SSL_METHOD *method = TLS_client_method();
     SSL_CTX *ctx = SSL_CTX_new(method);
     if (!ctx) {
-        fprintf(stderr, "Unable to create SSL context\n");
+        fprintf(stderr, "SSL context creation failed\n");
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }
     return ctx;
 }
 
-// Load server certificate and private key into the SSL context
-void LoadCerts(SSL_CTX *ctx, const char *CertFile, const char *KeyFile) {
-    if (SSL_CTX_use_certificate_file(ctx, CertFile, SSL_FILETYPE_PEM) <= 0) {
-        ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
-    }
-    if (SSL_CTX_use_PrivateKey_file(ctx, KeyFile, SSL_FILETYPE_PEM) <= 0) {
-        ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
-    }
-}
-
 int main(int argc, char **argv) {
-    int server_fd, client_fd;
-    struct sockaddr_in addr;
-    SSL_CTX *ctx;
-    char buf[1024], reply[1024];
-    int bytes;
-    SSL *ssl;
-    int port;
-
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s <port>\n", argv[0]);
-        return 0;
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <hostname> <port>\n", argv[0]);
+        return EXIT_FAILURE;
     }
-    port = atoi(argv[1]);
+
+    const char *hostname = argv[1];
+    const char *portnum = argv[2];
+    SSL_CTX *ctx = NULL;
+    SSL *ssl = NULL;
+    int sock = -1;
+    char buffer[4096];
+    ssize_t bytes_read;
 
     // Initialize OpenSSL
     SSL_library_init();
     OpenSSL_add_all_algorithms();
     SSL_load_error_strings();
 
-    // Create SSL context and load certificate/key
-    ctx = InitServerCTX();
-    LoadCerts(ctx, "cert.pem", "key.pem");
+    ctx = InitSSLContext();
 
-    SSL_CTX_set_session_id_context(ctx, (unsigned char*)"ctxid", strlen("ctxid"));
+    // Trust system CA paths
+    if (!SSL_CTX_load_verify_locations(ctx, "cert.pem", NULL)) {
+    fprintf(stderr, "Failed to load trusted certs\n");
+    ERR_print_errors_fp(stderr);
+    SSL_CTX_free(ctx);
+    return EXIT_FAILURE;
+}
 
 
-    const unsigned char sid_ctx[] = "my_unique_app_ctx";
-    if (!SSL_CTX_set_session_id_context(ctx, sid_ctx, sizeof(sid_ctx))) {
-        fprintf(stderr, "Could not set session ID context\n");
-        ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
+    // Resolve hostname
+    struct addrinfo hints, *res, *rp;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;    // IPv4 or IPv6
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+
+    int gai_result = getaddrinfo(hostname, portnum, &hints, &res);
+    if (gai_result != 0) {
+        fprintf(stderr, "Host resolution failed: %s\n", gai_strerror(gai_result));
+        SSL_CTX_free(ctx);
+        return EXIT_FAILURE;
     }
 
-    // Create TCP socket and listen on given port
-    server_fd = socket(PF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) berr_exit("socket");
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
-        berr_exit("bind");
+    for (rp = res; rp != NULL; rp = rp->ai_next) {
+        sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (sock == -1) continue;
+        if (connect(sock, rp->ai_addr, rp->ai_addrlen) == 0) break;
+        close(sock);
+        sock = -1;
     }
-    if (listen(server_fd, 1) != 0) {
-        berr_exit("listen");
+    freeaddrinfo(res);
+
+    if (sock == -1) {
+        fprintf(stderr, "Could not establish connection to %s:%s\n", hostname, portnum);
+        SSL_CTX_free(ctx);
+        return EXIT_FAILURE;
     }
-    printf("Listening on port %d...\n", port);
 
-    // Accept a client connection
-    client_fd = accept(server_fd, NULL, NULL);
-    if (client_fd < 0) berr_exit("accept");
-    printf("Client connected.\n");
-
-    // Create SSL object and attach to socket
+    // Create SSL object
     ssl = SSL_new(ctx);
-    SSL_set_fd(ssl, client_fd);
-    // Perform TLS handshake
-    if (SSL_accept(ssl) <= 0) {
+    if (!ssl) {
+        fprintf(stderr, "Failed to create SSL object\n");
+        close(sock);
+        SSL_CTX_free(ctx);
+        return EXIT_FAILURE;
+    }
+
+    SSL_set_fd(ssl, sock);
+
+    // Set hostname for SNI and cert verification
+    if (SSL_set1_host(ssl, hostname) != 1) {
+        fprintf(stderr, "Failed to set hostname for verification\n");
         ERR_print_errors_fp(stderr);
         goto cleanup;
     }
-    // Read password from client
-    bytes = SSL_read(ssl, buf, sizeof(buf)-1);
-    if (bytes <= 0) {
-        berr_exit("SSL_read");
+
+    // Require server certificate verification
+    SSL_set_verify(ssl, SSL_VERIFY_PEER, NULL);
+
+    if (SSL_connect(ssl) <= 0) {
+        fprintf(stderr, "TLS handshake failed\n");
+        ERR_print_errors_fp(stderr);
         goto cleanup;
     }
-    buf[bytes] = '\0';
-    // Check password
-    buf[strcspn(buf, "\r\n")] = '\0';
 
-    if (strcmp(buf, PASS) != 0) {
-        SSL_write(ssl, "Authentication failed\n", 22);
+    printf("Connected using %s encryption\n", SSL_get_cipher(ssl));
+
+    // Certificate verification
+    if (SSL_get_verify_result(ssl) != X509_V_OK) {
+        fprintf(stderr, "Server certificate verification failed\n");
         goto cleanup;
     }
-    SSL_write(ssl, "Authentication successful\n", 25);
 
-    // Interactive loop: read commands from client, execute, send back output
-    while (1) {
-        bytes = SSL_read(ssl, buf, sizeof(buf)-1);
-        if (bytes <= 0) break;
-        buf[bytes] = '\0';
-        if (strcmp(buf, "exit\n") == 0) {
+    // Send authentication password
+    snprintf(buffer, sizeof(buffer), "%s\n", PASS);
+    if (SSL_write(ssl, buffer, strlen(buffer)) <= 0) {
+        fprintf(stderr, "Password send failed\n");
+        ERR_print_errors_fp(stderr);
+        goto cleanup;
+    }
+
+    // Receive auth response
+    bytes_read = SSL_read(ssl, buffer, sizeof(buffer) - 1);
+    if (bytes_read <= 0) {
+        fprintf(stderr, "Authentication response failed\n");
+        goto cleanup;
+    }
+    buffer[bytes_read] = '\0';
+
+    if (strncmp(buffer, "Authentication successful", 25) != 0) {
+        fprintf(stderr, "Authentication failed: %s", buffer);
+        goto cleanup;
+    }
+
+    printf("%s", buffer);
+
+    // Command loop
+     while (1) {
+        printf("cmd> ");
+        if (!fgets(buffer, sizeof(buffer), stdin) || feof(stdin)) break;
+
+        buffer[strcspn(buffer, "\n")] = '\0'; // Remove newline
+
+        if (strcmp(buffer, "exit") == 0) {
+            SSL_write(ssl, buffer, strlen(buffer));
             break;
         }
-        // Execute command via popen()
-        FILE *fp = popen(buf, "r");
-        if (!fp) {
-            snprintf(reply, sizeof(reply), "Failed to execute command\n");
-            SSL_write(ssl, reply, strlen(reply));
-            continue;
+
+        strcat(buffer, "\n");  // Re-add newline for server
+
+        if (SSL_write(ssl, buffer, strlen(buffer)) <= 0) {
+            fprintf(stderr, "Command send failed\n");
+            break;
         }
-        // Send output lines to client
-        while (fgets(reply, sizeof(reply), fp) != NULL) {
-            SSL_write(ssl, reply, strlen(reply));
+
+        // Read response status
+        unsigned char status;
+        if (SSL_read(ssl, &status, 1) <= 0) {
+            fprintf(stderr, "Failed to read status\n");
+            break;
         }
-        pclose(fp);
+
+        // Read response length
+        uint32_t net_len, data_len;
+        if (SSL_read(ssl, &net_len, 4) <= 0) {
+            fprintf(stderr, "Failed to read length\n");
+            break;
+        }
+        data_len = ntohl(net_len);
+
+        // Read response data
+        if (data_len > 0) {
+            char *output = malloc(data_len + 1);
+            ssize_t total = 0;
+            while (total < data_len) {
+                bytes_read = SSL_read(ssl, output + total, data_len - total);
+                if (bytes_read <= 0) {
+                    fprintf(stderr, "Data read error\n");
+                    free(output);
+                    goto cleanup;
+                }
+                total += bytes_read;
+            }
+            output[data_len] = '\0';
+            printf("%s", output);
+            free(output);
+        }
     }
-    printf("Closing connection.\n");
+
 
 cleanup:
-    SSL_shutdown(ssl);
-    SSL_free(ssl);
-    close(client_fd);
-    close(server_fd);
-    SSL_CTX_free(ctx);
-    return 0;
+    if (ssl) {
+        SSL_shutdown(ssl);
+        SSL_free(ssl);
+    }
+    if (sock != -1) close(sock);
+    if (ctx) SSL_CTX_free(ctx);
+    EVP_cleanup();
+    return EXIT_SUCCESS;
 }
