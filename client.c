@@ -11,7 +11,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define PASS "secret"  // Predefined authentication password
+#define PASS "secret"  
 
 // Initialize SSL context
 SSL_CTX* InitSSLContext() {
@@ -143,7 +143,7 @@ int main(int argc, char **argv) {
     printf("%s", buffer);
 
     // Command loop
-    while (1) {
+     while (1) {
         printf("cmd> ");
         if (!fgets(buffer, sizeof(buffer), stdin) || feof(stdin)) break;
 
@@ -154,25 +154,47 @@ int main(int argc, char **argv) {
             break;
         }
 
-        strcat(buffer, "\n");  // Re-add newline for server side parsing
+        strcat(buffer, "\n");  // Re-add newline for server
 
         if (SSL_write(ssl, buffer, strlen(buffer)) <= 0) {
             fprintf(stderr, "Command send failed\n");
             break;
         }
 
-        // Read server output
-        while ((bytes_read = SSL_read(ssl, buffer, sizeof(buffer) - 1)) > 0) {
-            buffer[bytes_read] = '\0';
-            printf("%s", buffer);
-            if (bytes_read < sizeof(buffer) - 1) break;
-        }
-
-        if (bytes_read <= 0) {
-            if (bytes_read < 0) ERR_print_errors_fp(stderr);
+        // Read response status
+        unsigned char status;
+        if (SSL_read(ssl, &status, 1) <= 0) {
+            fprintf(stderr, "Failed to read status\n");
             break;
         }
+
+        // Read response length
+        uint32_t net_len, data_len;
+        if (SSL_read(ssl, &net_len, 4) <= 0) {
+            fprintf(stderr, "Failed to read length\n");
+            break;
+        }
+        data_len = ntohl(net_len);
+
+        // Read response data
+        if (data_len > 0) {
+            char *output = malloc(data_len + 1);
+            ssize_t total = 0;
+            while (total < data_len) {
+                bytes_read = SSL_read(ssl, output + total, data_len - total);
+                if (bytes_read <= 0) {
+                    fprintf(stderr, "Data read error\n");
+                    free(output);
+                    goto cleanup;
+                }
+                total += bytes_read;
+            }
+            output[data_len] = '\0';
+            printf("%s", output);
+            free(output);
+        }
     }
+
 
 cleanup:
     if (ssl) {
